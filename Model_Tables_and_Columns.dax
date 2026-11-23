@@ -1,0 +1,50 @@
+// Calculated columns, calculated tables and RLS roles - Project 1A
+
+// ----- Calculated column (add to table Loans) -----
+// IFRS 9 stage from DPD (>=30 -> 2, >=90 or defaulted -> 3). Matches the supplied stage for 500/500 loans.
+Stage_Rebuilt =
+    IF(OR(Loans[IsDefaulted] = TRUE(), Loans[DelinquencyDays] >= 90), 3, IF(Loans[DelinquencyDays] >= 30, 2, 1))
+
+// ----- Calculated tables (Modeling > New table) -----
+FromBucket =
+DATATABLE("Bucket", STRING, "Sort", INTEGER, {{"Current", 1}, {"1-29 DPD", 2}, {"30-59 DPD", 3}, {"60-89 DPD", 4}, {"90-119 DPD", 5}, {"120+ DPD", 6}, {"Default", 7}, {"Repossessed", 8}})
+
+ToBucket =
+DATATABLE("Bucket", STRING, "Sort", INTEGER, {{"Current", 1}, {"1-29 DPD", 2}, {"30-59 DPD", 3}, {"60-89 DPD", 4}, {"90-119 DPD", 5}, {"120+ DPD", 6}, {"Default", 7}, {"Repossessed", 8}})
+
+LossTiming =
+DATATABLE("MOB", INTEGER, "CumPct", DOUBLE, {{0, 0.0}, {6, 0.05}, {12, 0.17}, {18, 0.35}, {24, 0.57}, {36, 0.82}, {48, 0.94}, {60, 1.0}})
+
+DealParams =
+DATATABLE("Param", STRING, "Value", DOUBLE, {{"A Pct", 0.78}, {"B Pct", 0.12}, {"DQ Trigger", 0.05}, {"AAA Multiple", 3.5}, {"MRR Required", 0.1}, {"Trend Band", 0.1}, {"Alert Sigma", 2}, {"Recon Tolerance", 0.001}})
+
+SecurityMap =
+DATATABLE("UserEmail", STRING, "Role", STRING, "ServicerName", STRING, "Region", STRING, "PoolID", STRING, {
+    {"pm@example.com", "PortfolioManager", "", "South", ""},
+    {"analyst@example.com", "RiskAnalyst", "", "", ""},
+    {"cro@example.com", "SeniorManagement", "", "", ""},
+    {"auditor@example.com", "Auditor", "", "", "ZAAUTO2024-1"},
+    {"servicer@example.com", "Servicer", "ICICI Auto Loans", "", ""}})
+
+// ----- Row-level security: Modeling > Manage roles. One role per row; table filter expression shown. Test with 'View as'. -----
+// Role: Portfolio Manager - Sees only the regions mapped to the user.
+// Table: Loans
+[Filter] Loans[Region] IN SELECTCOLUMNS(FILTER(SecurityMap, SecurityMap[UserEmail] = USERPRINCIPALNAME() && SecurityMap[Role] = "PortfolioManager"), "r", SecurityMap[Region])
+
+// Role: Risk Analyst - Full pool access. Hide BorrowerID and AnnualIncome_INR with object-level security (Tabular Editor).
+// Table: Loans
+[Filter] TRUE()
+
+// Role: Senior Management - Full pool access; read-only reports.
+// Table: Loans
+[Filter] TRUE()
+
+// Role: Auditor - Sees only the pool under audit.
+// Table: Loans
+[Filter] Loans[PoolID] IN SELECTCOLUMNS(FILTER(SecurityMap, SecurityMap[UserEmail] = USERPRINCIPALNAME() && SecurityMap[Role] = "Auditor"), "p", SecurityMap[PoolID])
+
+// Role: Servicer - Sees only own loans; DPD_History follows through the Loans relationship.
+// Table: Loans
+[Filter] Loans[ServicerName] IN SELECTCOLUMNS(FILTER(SecurityMap, SecurityMap[UserEmail] = USERPRINCIPALNAME() && SecurityMap[Role] = "Servicer"), "s", SecurityMap[ServicerName])
+
+// Add real user e-mails to SecurityMap before publishing; the sample rows are placeholders.
